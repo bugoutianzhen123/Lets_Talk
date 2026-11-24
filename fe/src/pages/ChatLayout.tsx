@@ -13,6 +13,10 @@ import {
   PlusOutlined,
   UserAddOutlined,
   SearchOutlined,
+  SmileOutlined,
+  PictureOutlined,
+  FolderOutlined,
+  ScissorOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../store';
@@ -27,11 +31,18 @@ interface GroupItem {
   id: number;
   name: string;
   joined?: boolean;
+  last_message?: string;
+  last_time?: string;
+  last_sender_id?: number;
 }
 
 interface FriendItem {
   id: number;
   username: string;
+  online?: boolean;
+  last_message?: string;
+  last_time?: string;
+  last_sender_id?: number;
 }
 
 interface ApplicationItem {
@@ -69,6 +80,24 @@ const avatarOf = (seed: string) => {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 };
 
+// 会话列表时间：今天显示 HH:mm，其余显示 MM-DD
+const formatListTime = (t?: string) => {
+  if (!t) return '';
+  const d = moment(t);
+  if (!d.isValid()) return '';
+  return d.isSame(moment(), 'day') ? d.format('HH:mm') : d.format('MM-DD');
+};
+
+// 会话排序用：无最后消息的排到末尾
+const lastTimeValue = (item: { last_time?: string }) =>
+  item.last_time ? new Date(item.last_time).getTime() : 0;
+
+// 会话预览文案：区分「我：」与他人消息
+const previewText = (item: { last_message?: string; last_sender_id?: number }, myId: number) => {
+  if (!item.last_message) return '';
+  return item.last_sender_id === myId ? `我：${item.last_message}` : item.last_message;
+};
+
 export const ChatLayout: React.FC = () => {
   const { currentUser, setCurrentUser } = useChatStore();
   const navigate = useNavigate();
@@ -76,6 +105,8 @@ export const ChatLayout: React.FC = () => {
   // 群聊
   const [groups, setGroups] = useState<GroupItem[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  // 群聊已读时间戳（本地记录，用于计算未读红点）
+  const [groupReadTs, setGroupReadTs] = useState<Record<number, number>>({});
 
   // 单聊
   const [activeFriendId, setActiveFriendId] = useState<number | null>(null);
@@ -255,40 +286,64 @@ export const ChatLayout: React.FC = () => {
     };
   }, [activeGroupId, currentUser]);
 
-  // ---------- 私聊：常驻一条长连接，按 target_id 路由消息 ----------
+  // 打开群聊或收到该群新消息时，标记为已读（用于清除未读红点）
+  useEffect(() => {
+    if (!activeGroupId) return;
+    setGroupReadTs(prev => ({ ...prev, [Number(activeGroupId)]: Date.now() }));
+  }, [activeGroupId, messages]);
+
+  // ---------- 私聊：常驻一条长连接，断线自动重连，按 target_id 路由消息 ----------
   useEffect(() => {
     if (!currentUser) return;
 
-    const ws = new WebSocket(`${API_BASE.replace('http', 'ws')}/ws/friend?userid=${currentUser.id}`);
-    wsFriendRef.current = ws;
+    let stopped = false;
+    let current: WebSocket | null = null;
+    let retryTimer: number | undefined;
 
-    ws.onmessage = (event) => {
-      if (wsFriendRef.current !== ws) return;
-      try {
-        const raw = JSON.parse(event.data);
-        // 后端私聊推送使用 sender_id，这里统一成与群聊一致的 user_id
-        const msg: ChatMessage = {
-          user_id: raw.sender_id,
-          target_id: raw.target_id,
-          username: raw.username,
-          content: raw.content,
-          send_time: raw.send_time,
-        };
-        const counterpart = msg.user_id === currentUser.id ? msg.target_id : msg.user_id;
-        // 当前正与该好友聊天时直接追加；否则累计未读
-        if (counterpart === activeFriendIdRef.current && activeNavRef.current === 'contacts') {
-          setFriendMessages(prev => [...prev, msg]);
-        } else {
-          setUnread(prev => ({ ...prev, [counterpart as number]: (prev[counterpart as number] || 0) + 1 }));
+    const connect = () => {
+      if (stopped) return;
+      const ws = new WebSocket(`${API_BASE.replace('http', 'ws')}/ws/friend?userid=${currentUser.id}`);
+      current = ws;
+      wsFriendRef.current = ws;
+
+      ws.onmessage = (event) => {
+        if (wsFriendRef.current !== ws) return;
+        try {
+          const raw = JSON.parse(event.data);
+          // 后端私聊推送使用 sender_id，这里统一成与群聊一致的 user_id
+          const msg: ChatMessage = {
+            user_id: raw.sender_id,
+            target_id: raw.target_id,
+            username: raw.username,
+            content: raw.content,
+            send_time: raw.send_time,
+          };
+          const counterpart = msg.user_id === currentUser.id ? msg.target_id : msg.user_id;
+          // 当前正与该好友聊天时直接追加；否则累计未读
+          if (counterpart === activeFriendIdRef.current && activeNavRef.current === 'contacts') {
+            setFriendMessages(prev => [...prev, msg]);
+          } else {
+            setUnread(prev => ({ ...prev, [counterpart as number]: (prev[counterpart as number] || 0) + 1 }));
+          }
+        } catch (e) {
+          console.error(e);
         }
-      } catch (e) {
-        console.error(e);
-      }
+      };
+
+      // 断线后 3 秒自动重连，避免长连接静默断开导致「在线状态/消息推送」失效
+      ws.onclose = () => {
+        if (wsFriendRef.current === ws) wsFriendRef.current = null;
+        if (!stopped) retryTimer = window.setTimeout(connect, 3000);
+      };
     };
 
+    connect();
+
     return () => {
+      stopped = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
       wsFriendRef.current = null;
-      ws.close();
+      current?.close();
     };
   }, [currentUser]);
 
@@ -450,10 +505,14 @@ export const ChatLayout: React.FC = () => {
   // ---------- 派生数据 ----------
   const keyword = searchText.trim().toLowerCase();
   // 未搜索时只展示已加入的群聊；搜索时展示名称/群号匹配的全部群聊（含未加入，可点击「加入」）
-  const filteredGroups = keyword
+  const visibleGroups = keyword
     ? groups.filter(g => g.name.toLowerCase().includes(keyword) || String(g.id).includes(keyword))
     : groups.filter(g => g.joined);
-  const filteredFriends = friends.filter(f => f.username.toLowerCase().includes(keyword));
+  // 按最后消息时间倒序，像 IM 一样把最近活跃的会话排在前面
+  const filteredGroups = [...visibleGroups].sort((a, b) => lastTimeValue(b) - lastTimeValue(a));
+  const filteredFriends = friends
+    .filter(f => f.username.toLowerCase().includes(keyword))
+    .sort((a, b) => lastTimeValue(b) - lastTimeValue(a));
   const isFriend = (id: number) => friends.some(f => f.id === id);
 
   const userMenuItems = [
@@ -466,6 +525,14 @@ export const ChatLayout: React.FC = () => {
   if (!currentUser) return null;
 
   const activeFriend = friends.find(f => f.id === activeFriendId) || null;
+
+  // 群聊未读：最后一条消息不是我发的，晚于本地已读时间，且当前未在看该群
+  const hasGroupUnread = (g: GroupItem) => {
+    if (!g.joined || !g.last_time) return false;
+    if (g.last_sender_id === currentUser.id) return false;
+    if (activeGroupId === String(g.id)) return false;
+    return new Date(g.last_time).getTime() > (groupReadTs[g.id] || 0);
+  };
 
   // 消息气泡列表（群聊 / 单聊共用）
   const renderMessageList = (list: ChatMessage[]) => {
@@ -507,7 +574,26 @@ export const ChatLayout: React.FC = () => {
 
   // 输入区（群聊 / 单聊共用）
   const renderComposer = (placeholder: string, disabled: boolean, onSend: () => void) => (
-    <div style={{ background: '#fff', borderTop: '1px solid #f0f0f0', padding: '16px 24px' }}>
+    <div style={{ background: '#fff', borderTop: '1px solid #f0f0f0', padding: '10px 24px 16px' }}>
+      {/* 工具栏（表情/图片/文件/截图）：演示占位，点击给出提示 */}
+      <div style={{ display: 'flex', gap: 2, marginBottom: 6 }}>
+        {[
+          { icon: <SmileOutlined />, name: '表情' },
+          { icon: <PictureOutlined />, name: '图片' },
+          { icon: <FolderOutlined />, name: '文件' },
+          { icon: <ScissorOutlined />, name: '截图' },
+        ].map(t => (
+          <Tooltip key={t.name} title={`${t.name}（演示占位）`}>
+            <Button
+              type="text"
+              size="small"
+              icon={t.icon}
+              disabled={disabled}
+              onClick={() => message.info(`${t.name}功能开发中，敬请期待`)}
+            />
+          </Tooltip>
+        ))}
+      </div>
       <div style={{ display: 'flex', gap: 16 }}>
         <Input.TextArea
           value={inputValue}
@@ -602,6 +688,9 @@ export const ChatLayout: React.FC = () => {
             locale={{ emptyText: keyword ? '未找到匹配的群聊' : '暂未加入群聊，搜索群名称或群号即可加入' }}
             renderItem={item => {
               const selected = item.joined && activeGroupId === String(item.id);
+              const preview = item.joined
+                ? (previewText(item, currentUser.id) || `群号：${item.id}`)
+                : `未加入 · 群号：${item.id}`;
               return (
                 <List.Item
                   style={{
@@ -611,21 +700,36 @@ export const ChatLayout: React.FC = () => {
                     borderLeft: selected ? '3px solid #1890ff' : '3px solid transparent'
                   }}
                   onClick={() => item.joined && setActiveGroupId(String(item.id))}
-                  actions={item.joined ? undefined : [
-                    <Button key="join" type="primary" size="small" onClick={() => handleJoinGroup(item.id)}>
-                      加入
-                    </Button>
-                  ]}
                 >
-                  <List.Item.Meta
-                    avatar={<Avatar src={avatarOf(item.name)} shape="square" size="large" />}
-                    title={<Text strong type={item.joined ? undefined : 'secondary'}>{item.name}</Text>}
-                    description={
-                      <Text type="secondary" ellipsis style={{ maxWidth: 150 }}>
-                        {item.joined ? `群号：${item.id}` : '未加入 · 群号：' + item.id}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                    <Badge dot={hasGroupUnread(item)} offset={[-2, 4]}>
+                      <Avatar src={avatarOf(item.name)} shape="square" size="large" />
+                    </Badge>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <Text strong type={item.joined ? undefined : 'secondary'} ellipsis style={{ flex: 1 }}>
+                          {item.name}
+                        </Text>
+                        {item.joined && (
+                          <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+                            {formatListTime(item.last_time)}
+                          </Text>
+                        )}
+                      </div>
+                      <Text type="secondary" ellipsis style={{ fontSize: 12 }}>
+                        {preview}
                       </Text>
-                    }
-                  />
+                    </div>
+                    {!item.joined && (
+                      <Button
+                        type="primary"
+                        size="small"
+                        onClick={(e) => { e.stopPropagation(); handleJoinGroup(item.id); }}
+                      >
+                        加入
+                      </Button>
+                    )}
+                  </div>
                 </List.Item>
               );
             }}
@@ -667,6 +771,7 @@ export const ChatLayout: React.FC = () => {
               renderItem={item => {
                 const count = unread[item.id] || 0;
                 const selected = activeFriendId === item.id;
+                const preview = previewText(item, currentUser.id) || (item.online ? '在线' : '离线');
                 return (
                   <List.Item
                     style={{
@@ -677,15 +782,33 @@ export const ChatLayout: React.FC = () => {
                     }}
                     onClick={() => setActiveFriendId(item.id)}
                   >
-                    <List.Item.Meta
-                      avatar={
-                        <Badge count={count} size="small">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                      <Badge count={count} size="small">
+                        <div style={{ position: 'relative' }}>
                           <Avatar size="large" src={avatarOf(item.username)} />
-                        </Badge>
-                      }
-                      title={<Text strong>{item.username}</Text>}
-                      description={<Text type="secondary" style={{ fontSize: 12 }}>好友 ID：{item.id}</Text>}
-                    />
+                          {/* 在线状态小圆点：绿=在线，灰=离线 */}
+                          <span style={{
+                            position: 'absolute',
+                            right: -1,
+                            bottom: -1,
+                            width: 10,
+                            height: 10,
+                            borderRadius: '50%',
+                            background: item.online ? '#52c41a' : '#d9d9d9',
+                            border: '2px solid #fff',
+                          }} />
+                        </div>
+                      </Badge>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <Text strong ellipsis style={{ flex: 1 }}>{item.username}</Text>
+                          <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+                            {formatListTime(item.last_time)}
+                          </Text>
+                        </div>
+                        <Text type="secondary" ellipsis style={{ fontSize: 12 }}>{preview}</Text>
+                      </div>
+                    </div>
                   </List.Item>
                 );
               }}

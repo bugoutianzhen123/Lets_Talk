@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 interface User {
   id: number;
@@ -13,7 +13,8 @@ interface ChatStore {
   setToken: (token: string | null) => void;
 }
 
-// 登录态持久化到 localStorage，刷新页面后无需重新登录
+// 登录态持久化到 sessionStorage：刷新页面不会退出登录，且各浏览器窗口/标签互不影响，
+// 便于同一浏览器开两个窗口分别登录不同账号进行演示。
 export const useChatStore = create<ChatStore>()(
   persist(
     (set) => ({
@@ -22,6 +23,6 @@ export const useChatStore = create<ChatStore>()(
       token: null,
       setToken: (token) => set({ token }),
     }),
-    { name: 'lets-talk-auth' },
+    { name: 'lets-talk-auth', storage: createJSONStorage(() => sessionStorage) },
   ),
 );
