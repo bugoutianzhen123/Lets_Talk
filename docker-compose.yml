@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./be
+      dockerfile: Dockerfile
+    container_name: letstalk-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./be/config:/root/config  # 将配置挂载出来方便修改
+    restart: unless-stopped
+    networks:
+      - letstalk-net
+
+  frontend:
+    build:
+      context: ./fe
+      dockerfile: Dockerfile
+    container_name: letstalk-frontend
+    ports:
+      - "3000:80"  # 宿主机3000映射到Nginx的80
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - letstalk-net
+
+networks:
+  letstalk-net:
+    driver: bridge
