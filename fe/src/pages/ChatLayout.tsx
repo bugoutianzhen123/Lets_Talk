@@ -25,7 +25,13 @@ import moment from 'moment';
 const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
 
-const API_BASE = 'http://localhost:8080';
+// 接口统一使用相对路径：本地由 Vite 代理转发，线上由 Nginx 反代到后端，避免写死后端地址
+const API_BASE = '';
+// WebSocket 需要绝对地址，基于当前页面 origin 推导（http→ws / https→wss）
+const wsUrl = (path: string) => {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${window.location.host}${path}`;
+};
 
 interface GroupItem {
   id: number;
@@ -261,7 +267,7 @@ export const ChatLayout: React.FC = () => {
         if (!cancelled) setMessages([]);
       });
 
-    const ws = new WebSocket(`${API_BASE.replace('http', 'ws')}/ws?groupid=${activeGroupId}&userid=${currentUser.id}`);
+    const ws = new WebSocket(wsUrl(`/ws?groupid=${activeGroupId}&userid=${currentUser.id}`));
 
     ws.onopen = () => {
       if (wsRef.current === ws) setIsConnected(true);
@@ -302,7 +308,7 @@ export const ChatLayout: React.FC = () => {
 
     const connect = () => {
       if (stopped) return;
-      const ws = new WebSocket(`${API_BASE.replace('http', 'ws')}/ws/friend?userid=${currentUser.id}`);
+      const ws = new WebSocket(wsUrl(`/ws/friend?userid=${currentUser.id}`));
       current = ws;
       wsFriendRef.current = ws;
 

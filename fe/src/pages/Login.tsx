@@ -19,7 +19,8 @@ export const Login: React.FC = () => {
     setSuccessMsg('');
     try {
       const endpoint = isLogin ? '/user/login' : '/user/register';
-      const response = await fetch(`http://localhost:8080${endpoint}`, {
+      // 使用相对路径：本地由 Vite 代理、线上由 Nginx 反代到后端
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(values),
