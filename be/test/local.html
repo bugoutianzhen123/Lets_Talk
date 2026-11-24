@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket 分组测试工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 100%;
+            margin: 20px auto;
+            padding: 40px;
+        }
+        .container {
+            display: flex;
+            gap: 40px;
+        }
+        .group-panel {
+            border: 1px solid #ccc;
+            padding: 15px;
+            border-radius: 8px;
+            flex: 1;
+        }
+        .status {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+        .user-id-input {
+            margin-bottom: 10px;
+        }
+        .user-id-input input {
+            width: 150px;
+        }
+        input[type="number"] {
+            width: 120px;
+            padding: 5px;
+            margin-right: 10px;
+        }
+        button {
+            padding: 5px 15px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .message-list {
+            height: 300px;
+            border: 1px solid #eee;
+            padding: 10px;
+            margin-top: 10px;
+            overflow-y: auto;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 4px;
+        }
+        .sent {
+            background: #e3f2fd;
+        }
+        .received {
+            background: #f0f4c3;
+        }
+    </style>
+</head>
+<body>
+<h2>WebSocket 分组测试工具</h2>
+<div class="container">
+    <div class="group-panel">
+        <h3>分组1</h3>
+        <div class="user-id-input">
+            <input type="number" id="user1Id" placeholder="输入用户ID" min="1">
+        </div>
+        <div>
+            <input type="number" id="group1Id" placeholder="输入分组ID" min="0">
+            <button onclick="connectGroup(1)">加入分组</button>
+        </div>
+        <div class="status" id="status1">未连接</div>
+        <div class="message-list" id="messages1"></div>
+        <div>
+            <input type="text" id="message1" placeholder="输入消息">
+            <button onclick="sendMessage(1)">发送</button>
+        </div>
+    </div>
+
+    <div class="group-panel">
+        <h3>分组2</h3>
+        <div class="user-id-input">
+            <input type="number" id="user2Id" placeholder="输入用户ID" min="1">
+        </div>
+        <div>
+            <input type="number" id="group2Id" placeholder="输入分组ID" min="0">
+            <button onclick="connectGroup(2)">加入分组</button>
+        </div>
+        <div class="status" id="status2">未连接</div>
+        <div class="message-list" id="messages2"></div>
+        <div>
+            <input type="text" id="message2" placeholder="输入消息">
+            <button onclick="sendMessage(2)">发送</button>
+        </div>
+    </div>
+
+    <div class="group-panel">
+        <h3>分组3</h3>
+        <div class="user-id-input">
+            <input type="number" id="user3Id" placeholder="输入用户ID" min="1">
+        </div>
+        <div>
+            <input type="number" id="group3Id" placeholder="输入分组ID" min="0">
+            <button onclick="connectGroup(3)">加入分组</button>
+        </div>
+        <div class="status" id="status3">未连接</div>
+        <div class="message-list" id="messages3"></div>
+        <div>
+            <input type="text" id="message3" placeholder="输入消息">
+            <button onclick="sendMessage(3)">发送</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const connections = {
+        1: null,
+        2: null,
+        3: null
+    };
+
+    // 连接分组
+    function connectGroup(groupNum) {
+        const userId = document.getElementById(`user${groupNum}Id`).value;
+        const groupId = document.getElementById(`group${groupNum}Id`).value;
+
+        if (!userId || !groupId) {
+            alert("请填写用户ID和分组ID");
+            return;
+        }
+
+        // 关闭旧连接
+        if (connections[groupNum]) {
+            connections[groupNum].close();
+        }
+
+        // 建立新连接
+        const ws = new WebSocket(`ws://localhost:8080/ws?groupid=${groupId}&userid=${userId}`);
+
+        ws.onopen = () => {
+            updateStatus(groupNum, `已连接分组 ${groupId}`, '#28a745');
+            connections[groupNum] = ws;
+        };
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            addMessage(groupNum,
+                `[用户${msg.user_id}] ${msg.content}`,
+                'received'
+            );
+        };
+
+        ws.onclose = () => {
+            updateStatus(groupNum, "连接已关闭", '#dc3545');
+            connections[groupNum] = null;
+        };
+
+        ws.onerror = (error) => {
+            updateStatus(groupNum, `连接错误: ${error.message}`, '#dc3545');
+        };
+    }
+
+    // 发送消息
+    function sendMessage(groupNum) {
+        const ws = connections[groupNum];
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            alert("请先加入分组");
+            return;
+        }
+
+        const input = document.getElementById(`message${groupNum}`);
+        const message = input.value;
+        if (message) {
+            ws.send(message);
+            addMessage(groupNum, `发送: ${message}`, 'sent');
+            input.value = "";
+        }
+    }
+
+    // 更新状态显示
+    function updateStatus(groupNum, text, color) {
+        const statusEl = document.getElementById(`status${groupNum}`);
+        statusEl.textContent = text;
+        statusEl.style.color = color;
+    }
+
+    // 添加消息到列表
+    function addMessage(groupNum, text, type) {
+        const messagesEl = document.getElementById(`messages${groupNum}`);
+        const div = document.createElement('div');
+        div.className = `message ${type}`;
+        div.textContent = text;
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // 新增：显示当前用户
+    function updateStatus(groupNum, text, color) {
+        const userId = document.getElementById(`user${groupNum}Id`).value;
+        const statusEl = document.getElementById(`status${groupNum}`);
+        statusEl.innerHTML = `${text}<br>用户ID: ${userId}`;
+        statusEl.style.color = color;
+    }
+</script>
+</body>
+</html>
