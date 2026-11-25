@@ -13,10 +13,6 @@ import {
   PlusOutlined,
   UserAddOutlined,
   SearchOutlined,
-  SmileOutlined,
-  PictureOutlined,
-  FolderOutlined,
-  ScissorOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../store';
@@ -580,26 +576,7 @@ export const ChatLayout: React.FC = () => {
 
   // 输入区（群聊 / 单聊共用）
   const renderComposer = (placeholder: string, disabled: boolean, onSend: () => void) => (
-    <div style={{ background: '#fff', borderTop: '1px solid #f0f0f0', padding: '10px 24px 16px' }}>
-      {/* 工具栏（表情/图片/文件/截图）：演示占位，点击给出提示 */}
-      <div style={{ display: 'flex', gap: 2, marginBottom: 6 }}>
-        {[
-          { icon: <SmileOutlined />, name: '表情' },
-          { icon: <PictureOutlined />, name: '图片' },
-          { icon: <FolderOutlined />, name: '文件' },
-          { icon: <ScissorOutlined />, name: '截图' },
-        ].map(t => (
-          <Tooltip key={t.name} title={`${t.name}（演示占位）`}>
-            <Button
-              type="text"
-              size="small"
-              icon={t.icon}
-              disabled={disabled}
-              onClick={() => message.info(`${t.name}功能开发中，敬请期待`)}
-            />
-          </Tooltip>
-        ))}
-      </div>
+    <div style={{ background: '#fff', borderTop: '1px solid #f0f0f0', padding: '16px 24px' }}>
       <div style={{ display: 'flex', gap: 16 }}>
         <Input.TextArea
           value={inputValue}
